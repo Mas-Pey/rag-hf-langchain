@@ -1,4 +1,3 @@
-# Env library
 import os
 from dotenv import load_dotenv
 # import openai
@@ -13,17 +12,18 @@ from qdrant_client import QdrantClient
 from qdrant_client.http.models import Distance, VectorParams, PointStruct
 from fastapi import File, UploadFile
 from fastapi.responses import JSONResponse
-# from fastapi.middleware.cors import CORSMiddleware
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.schema import Document
 
-# from selenium import webdriver
-# from selenium.webdriver.common.by import By
-# from selenium.webdriver.support.ui import WebDriverWait
-# from selenium.webdriver.support import expected_conditions as EC
-# from selenium.webdriver.chrome.options import Options
-# from bs4 import BeautifulSoup
+# For Indexing HTML
+from selenium.webdriver.chrome.options import Options
+from fastapi.middleware.cors import CORSMiddleware
+from selenium import webdriver
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from bs4 import BeautifulSoup
 
 # Load .env file
 load_dotenv()
@@ -62,13 +62,13 @@ app = FastAPI(
     version="0.1"
 )
 
-# # CORS 
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["*"],
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
+# CORS 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # # Retrieval function with QdrantVectorStore
 # def get_retriever_context(input_query):
@@ -186,127 +186,127 @@ async def index_pdf(file: UploadFile = File(...)):
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
-# # --- Endpoint indexing HTML ---
-# @app.post("/indexing-html")
-# async def indexing_html(req: URLRequest):
-#     start_time = time.time()
-#     try:
-#         # Validasi URL harus dari domain booking.forrizhotels.com
-#         if not req.url.startswith("https://booking.forrizhotels.com/en/offers"):
-#             raise HTTPException(
-#                 status_code=400,
-#                 detail="URL tidak valid. Harus diawali dengan 'https://booking.forrizhotels.com/en/offers'"
-#             )
+# --- Endpoint indexing HTML ---
+@app.post("/indexing-html")
+async def indexing_html(req: URLRequest):
+    start_time = time.time()
+    try:
+        # Validasi URL harus dari domain booking.forrizhotels.com
+        if not req.url.startswith("https://booking.forrizhotels.com/en/offers"):
+            raise HTTPException(
+                status_code=400,
+                detail="URL tidak valid. Harus diawali dengan 'https://booking.forrizhotels.com/en/offers'"
+            )
             
-#         # Render HTML menggunakan headless browser
-#         options = Options()
-#         options.add_argument("--headless")
-#         options.add_argument("--disable-gpu")
-#         options.add_argument("--no-sandbox")
-#         driver = webdriver.Chrome(options=options)
-#         driver.get(req.url)
+        # Render HTML menggunakan headless browser
+        options = Options()
+        options.add_argument("--headless")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--no-sandbox")
+        driver = webdriver.Chrome(options=options)
+        driver.get(req.url)
         
-#         # Tunggu sampai konten kamar muncul (maks 5 detik)
-#         try:
-#             WebDriverWait(driver, 5).until(
-#                 EC.presence_of_element_located((By.CLASS_NAME, "Room_rooms-content__XOlpf"))
-#             )
-#         except:
-#             driver.quit()  # tutup browser agar tidak tertinggal
-#             raise HTTPException(
-#                 status_code=400,
-#                 detail=f"Konten kamar tidak muncul dari URL: {req.url}. Halaman mungkin tidak valid atau gagal dimuat."
-#             )
+        # Tunggu sampai konten kamar muncul (maks 10 detik)
+        try:
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CLASS_NAME, "Room_rooms-content__XOlpf"))
+            )
+        except:
+            driver.quit()  # tutup browser agar tidak tertinggal
+            raise HTTPException(
+                status_code=400,
+                detail=f"Konten kamar tidak muncul dari URL: {req.url}. Halaman mungkin tidak valid atau gagal dimuat."
+            )
 
-#         soup = BeautifulSoup(driver.page_source, "html.parser")
-#         driver.quit()
+        soup = BeautifulSoup(driver.page_source, "html.parser")
+        driver.quit()
 
-#         # Kumpulkan isi untuk di-chunk
-#         texts = []
+        # Kumpulkan isi untuk di-chunk
+        texts = []
         
-#         # Tambahkan URL sebagai bagian dari isi
-#         texts.append(f"Source: {str(req.url)}")  # ⬅️ Tambahkan ini sebagai baris pertama isi teks
+        # Tambahkan URL sebagai bagian dari isi
+        texts.append(f"Source: {str(req.url)}")  # ⬅️ Tambahkan ini sebagai baris pertama isi teks
 
-#         # Ambil tanggal
-#         dates_div = soup.find("div", class_="Room_form-reservation__pLRhg Room_sw__r8XCu")
-#         if dates_div:
-#             div_tanggal = dates_div.find("div", class_="cursor-pointer")
-#             if div_tanggal:
-#                 tanggal_teks = div_tanggal.get_text(separator=" ", strip=True)
-#                 texts.append("Cek ketersediaan kamar untuk tanggal: " + tanggal_teks)
+        # Ambil tanggal
+        dates_div = soup.find("div", class_="Room_form-reservation__pLRhg Room_sw__r8XCu")
+        if dates_div:
+            div_tanggal = dates_div.find("div", class_="cursor-pointer")
+            if div_tanggal:
+                tanggal_teks = div_tanggal.get_text(separator=" ", strip=True)
+                texts.append("Cek ketersediaan kamar untuk tanggal: " + tanggal_teks)
 
-#         # Ambil konten kamar
-#         room_content = soup.find_all("div", class_="Room_rooms-content__XOlpf mb-4")
-#         for room in room_content:
-#             lines = []
-#             room_name = room.find("h4")
+        # Ambil konten kamar
+        room_content = soup.find_all("div", class_="Room_rooms-content__XOlpf mb-4")
+        for room in room_content:
+            lines = []
+            room_name = room.find("h4")
             
-#             # Ambil tipe kamar
-#             if room_name:
-#                 lines.append("Tipe: " + room_name.get_text(strip=True))
+            # Ambil tipe kamar
+            if room_name:
+                lines.append("Tipe: " + room_name.get_text(strip=True))
 
-#             # Cek status ketersediaan
-#             alert = room.find("div", class_="alert alert-danger mt-2 fs-14 text-dark")
-#             if alert:
-#                 lines.append("Status: " + alert.get_text(strip=True))
-#             else:
-#                 lines.append("Status: Tersedia")
-#                 # Ambil harga kamar
-#                 prices = room.find_all("p", class_="Room_price__FmwGC fs-20 mb-0 fw-bold")
-#                 unique_prices = list(dict.fromkeys(p.get_text(strip=True) for p in prices))
-#                 for i, price in enumerate(unique_prices, start=1):
-#                     lines.append(
-#                         f"Harga {i}: {price}" if len(unique_prices) > 1 else f"Harga: {price}"
-#                     )
-#                 # Ambil detail kamar
-#                 room_details = room.find_all("h5", class_="fw-bold font-18 cursor-pointer")
-#                 unique_details = list(dict.fromkeys(d.get_text(strip=True) for d in room_details))
-#                 for i, detail in enumerate(unique_details, start=1):
-#                     lines.append(
-#                         f"Detail {i}: {detail}" if len(unique_details) > 1 else f"Detail: {detail}"
-#                     )
+            # Cek status ketersediaan
+            alert = room.find("div", class_="alert alert-danger mt-2 fs-14 text-dark")
+            if alert:
+                lines.append("Status: " + alert.get_text(strip=True))
+            else:
+                lines.append("Status: Tersedia")
+                # Ambil harga kamar
+                prices = room.find_all("p", class_="Room_price__FmwGC fs-20 mb-0 fw-bold")
+                unique_prices = list(dict.fromkeys(p.get_text(strip=True) for p in prices))
+                for i, price in enumerate(unique_prices, start=1):
+                    lines.append(
+                        f"Harga {i}: {price}" if len(unique_prices) > 1 else f"Harga: {price}"
+                    )
+                # Ambil detail kamar
+                room_details = room.find_all("h5", class_="fw-bold font-18 cursor-pointer")
+                unique_details = list(dict.fromkeys(d.get_text(strip=True) for d in room_details))
+                for i, detail in enumerate(unique_details, start=1):
+                    lines.append(
+                        f"Detail {i}: {detail}" if len(unique_details) > 1 else f"Detail: {detail}"
+                    )
 
-#             texts.append("\n".join(lines))
+            texts.append("\n".join(lines))
             
-#         # Gabungkan teks menjadi 1 dokumen
-#         isi_gabungan = "\n\n".join(texts)
-#         print(isi_gabungan)
-#         dokumen_gabungan = [Document(page_content=isi_gabungan, metadata={"source": "html"})]
+        # Gabungkan teks menjadi 1 dokumen
+        isi_gabungan = "\n\n".join(texts)
+        print(isi_gabungan)
+        dokumen_gabungan = [Document(page_content=isi_gabungan, metadata={"source": "html"})]
 
-#         # Buat koleksi jika belum ada
-#         if not client.collection_exists(collection_name):
-#             client.create_collection(
-#                 collection_name=collection_name,
-#                 vectors_config=VectorParams(distance=Distance.COSINE, size=1024),
-#             )
+        # Buat koleksi jika belum ada
+        if not client_qdrant.collection_exists(collection_name):
+            client_qdrant.create_collection(
+                collection_name=collection_name,
+                vectors_config=VectorParams(distance=Distance.COSINE, size=1024),
+            )
 
-#         # Simpan vektor ke Qdrant
-#         vector_store = QdrantVectorStore(
-#             client=client,
-#             collection_name=collection_name,
-#             embedding=embeddings,
-#         )
-#         vector_store.add_documents(documents=dokumen_gabungan)
+        # Simpan vektor ke Qdrant
+        vector_store = QdrantVectorStore(
+            client=client,
+            collection_name=collection_name,
+            embedding=embeddings,
+        )
+        vector_store.add_documents(documents=dokumen_gabungan)
 
-#         # Cek jumlah vektor setelah indexing
-#         total_vectors = client.count(collection_name=collection_name).count
-#         print("Jumlah vektor yang tersimpan:", total_vectors)
+        # Cek jumlah vektor setelah indexing
+        total_vectors = client.count(collection_name=collection_name).count
+        print("Jumlah vektor yang tersimpan:", total_vectors)
 
-#         # Hitung durasi proses
-#         duration = round(time.time() - start_time, 2)  # waktu dalam detik (2 angka desimal)
-#         print(f"⏱️ Total waktu proses indexing: {duration} detik")
+        # Hitung durasi proses
+        duration = round(time.time() - start_time, 2)  # waktu dalam detik (2 angka desimal)
+        print(f"⏱️ Total waktu proses indexing: {duration} detik")
 
-#         return JSONResponse(
-#             content={
-#                 "message": "✅ Indexing HTML berhasil!",
-#                 "jumlah_vektor": total_vectors,
-#                 "durasi_detik": duration
-#             },
-#             status_code=200
-#         )
+        return JSONResponse(
+            content={
+                "message": "✅ Indexing HTML berhasil!",
+                "jumlah_vektor": total_vectors,
+                "durasi_detik": duration
+            },
+            status_code=200
+        )
 
-#     except Exception as e:
-#         return JSONResponse(content={"error": str(e)}, status_code=500)
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
 # # Endpoint dengan RAG
