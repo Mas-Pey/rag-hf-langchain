@@ -9,7 +9,7 @@ st.set_page_config(page_title="ForrizAI", layout="centered")
 col1, col2 = st.columns([1,4])
 
 with col1:
-    st.image("./images/assistant.png", width="stretch")
+    st.image("./frontend/images/assistant.png", width="stretch")
 
 with col2:
     st.markdown("""
@@ -47,29 +47,29 @@ if st.session_state.get("do_indexing"):
 
     st.session_state.do_indexing = False
     
-# Input URL HTML
-html_url = st.sidebar.text_input("Masukkan URL halaman untuk di-indexing")
+# # Input URL HTML
+# html_url = st.sidebar.text_input("Masukkan URL halaman untuk di-indexing")
 
-# Tombol untuk indexing HTML
-if st.sidebar.button("📤 Chunking-HTML") and html_url:
-    st.session_state.do_indexing_html = True    
+# # Tombol untuk indexing HTML
+# if st.sidebar.button("📤 Chunking-HTML") and html_url:
+    # st.session_state.do_indexing_html = True    
 
-# Jalankan proses indexing HTML jika tombol ditekan
-if st.session_state.get("do_indexing_html"):
-    st.markdown("⏳ Proses indexing HTML sedang berjalan...")
+# # Jalankan proses indexing HTML jika tombol ditekan
+# if st.session_state.get("do_indexing_html"):
+#     st.markdown("⏳ Proses indexing HTML sedang berjalan...")
 
-    try:
-        res = requests.post("http://127.0.0.1:8000/indexing-html", json={"url": html_url})
-        if res.status_code == 200:
-            jumlah = res.json().get("jumlah_vektor", "tidak diketahui")
-            durasi = res.json().get("durasi_detik", "tidak tersedia")
-            st.success(f"✅ Indexing HTML berhasil! Total vektor: {jumlah} (dalam {durasi} detik)")
-        else:
-            st.error(f"❌ Gagal indexing HTML: {res.text}")
-    except Exception as e:
-        st.error(f"❌ Terjadi kesalahan saat indexing HTML: {e}")
+#     try:
+#         res = requests.post("http://127.0.0.1:8000/indexing-html", json={"url": html_url})
+#         if res.status_code == 200:
+#             jumlah = res.json().get("jumlah_vektor", "tidak diketahui")
+#             durasi = res.json().get("durasi_detik", "tidak tersedia")
+#             st.success(f"✅ Indexing HTML berhasil! Total vektor: {jumlah} (dalam {durasi} detik)")
+#         else:
+#             st.error(f"❌ Gagal indexing HTML: {res.text}")
+#     except Exception as e:
+#         st.error(f"❌ Terjadi kesalahan saat indexing HTML: {e}")
 
-    st.session_state.do_indexing_html = False
+#     st.session_state.do_indexing_html = False
 
 
 # --- Session State for history ---
