@@ -1,10 +1,6 @@
-import os
+import os, time, tempfile, shutil, uuid, requests
 from dotenv import load_dotenv
 # import openai
-import time
-import tempfile
-import shutil
-import uuid
 
 # For Indexing
 from huggingface_hub import InferenceClient
@@ -17,13 +13,7 @@ from langchain.text_splitter import CharacterTextSplitter
 from langchain.schema import Document
 
 # For Indexing HTML
-from selenium.webdriver.chrome.options import Options
-from fastapi.middleware.cors import CORSMiddleware
-from selenium import webdriver
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
-from bs4 import BeautifulSoup
+from datetime import datetime
 
 # Load .env file
 load_dotenv()
@@ -60,14 +50,6 @@ app = FastAPI(
     title="Hotel Forriz API",
     description="API for Hotel Chatbot",
     version="0.1"
-)
-
-# CORS 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
 )
 
 # # Retrieval function with QdrantVectorStore
@@ -110,7 +92,19 @@ class QueryRequest(BaseModel):
     
 # Model input URL 
 class URLRequest(BaseModel):
-    url: str
+    checkin: str
+    checkout: str
+    hotel_id: str
+    
+def format_tanggal(tanggal_str: str) -> str:
+    bulan_id = {
+        "01": "Januari", "02": "Februari", "03": "Maret",
+        "04": "April", "05": "Mei", "06": "Juni",
+        "07": "Juli", "08": "Agustus", "09": "September",
+        "10": "Oktober", "11": "November", "12": "Desember"
+    }
+    tgl = datetime.strptime(tanggal_str, "%Y-%m-%d")
+    return f"{tgl.day} {bulan_id[tanggal_str[5:7]]} {tgl.year}"
     
 # Endpoint indexing file PDF
 @app.post("/indexing")
@@ -186,111 +180,95 @@ async def index_pdf(file: UploadFile = File(...)):
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
-# --- Endpoint indexing HTML ---
-@app.post("/indexing-html")
+# --- Endpoint indexing URL ---
+@app.post("/indexing-url")
 async def indexing_html(req: URLRequest):
     start_time = time.time()
     try:
-        # Validasi URL harus dari domain booking.forrizhotels.com
-        if not req.url.startswith("https://booking.forrizhotels.com/en/offers"):
-            raise HTTPException(
-                status_code=400,
-                detail="URL tidak valid. Harus diawali dengan 'https://booking.forrizhotels.com/en/offers'"
-            )
-            
-        # Render HTML menggunakan headless browser
-        options = Options()
-        options.add_argument("--headless")
-        options.add_argument("--disable-gpu")
-        options.add_argument("--no-sandbox")
-        driver = webdriver.Chrome(options=options)
-        driver.get(req.url)
+        # Request ke API hotel
+        url_api = "https://booking.forrizhotels.com/api/v2/offers/room"
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Content-Type": "application/json",
+            "Authorization": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJndWVzdCI6dHJ1ZSwiaWF0IjoxNzQ0MTAzMjk1LCJleHAiOjQ4OTc3MDMyOTUsImp0aSI6IjlveXZCemktdWRqZ3lSeDBOSy1KM1lSWnhTZkNuZ1hUX2dsLV94cExFM0E9In0.h0rWAisFpD6LmZzgh7l8h0ABG_fi_8wxZaULHFDu04U",
+        }
         
-        # Tunggu sampai konten kamar muncul (maks 10 detik)
-        try:
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CLASS_NAME, "Room_rooms-content__XOlpf"))
-            )
-        except:
-            driver.quit()  # tutup browser agar tidak tertinggal
-            raise HTTPException(
-                status_code=400,
-                detail=f"Konten kamar tidak muncul dari URL: {req.url}. Halaman mungkin tidak valid atau gagal dimuat."
-            )
-
-        soup = BeautifulSoup(driver.page_source, "html.parser")
-        driver.quit()
-
-        # Kumpulkan isi untuk di-chunk
-        texts = []
+        payload = {
+            "checkin": req.checkin,
+            "checkout": req.checkout,
+            "id": req.hotel_id,   
+        }
         
-        # Tambahkan URL sebagai bagian dari isi
-        texts.append(f"Source: {str(req.url)}")  # ⬅️ Tambahkan ini sebagai baris pertama isi teks
+        response = requests.post(url_api, headers=headers, json=payload)
+        if response.status_code != 200:
+            raise HTTPException(status_code=400, detail=f"Request failed: {response.status_code}")
+        
+        data = response.json()
+        rooms = data.get("room", [])
 
-        # Ambil tanggal
-        dates_div = soup.find("div", class_="Room_form-reservation__pLRhg Room_sw__r8XCu")
-        if dates_div:
-            div_tanggal = dates_div.find("div", class_="cursor-pointer")
-            if div_tanggal:
-                tanggal_teks = div_tanggal.get_text(separator=" ", strip=True)
-                texts.append("Cek ketersediaan kamar untuk tanggal: " + tanggal_teks)
+        # Siapkan teks gabungan untuk indexing
+        checkin_text = format_tanggal(req.checkin)
+        checkout_text = format_tanggal(req.checkout)
+        texts = [f"Ketersediaan Kamar untuk tanggal: {checkin_text} s.d {checkout_text}"]
 
-        # Ambil konten kamar
-        room_content = soup.find_all("div", class_="Room_rooms-content__XOlpf mb-4")
-        for room in room_content:
-            lines = []
-            room_name = room.find("h4")
-            
-            # Ambil tipe kamar
-            if room_name:
-                lines.append("Tipe: " + room_name.get_text(strip=True))
-
-            # Cek status ketersediaan
-            alert = room.find("div", class_="alert alert-danger mt-2 fs-14 text-dark")
-            if alert:
-                lines.append("Status: " + alert.get_text(strip=True))
-            else:
-                lines.append("Status: Tersedia")
-                # Ambil harga kamar
-                prices = room.find_all("p", class_="Room_price__FmwGC fs-20 mb-0 fw-bold")
-                unique_prices = list(dict.fromkeys(p.get_text(strip=True) for p in prices))
-                for i, price in enumerate(unique_prices, start=1):
-                    lines.append(
-                        f"Harga {i}: {price}" if len(unique_prices) > 1 else f"Harga: {price}"
-                    )
-                # Ambil detail kamar
-                room_details = room.find_all("h5", class_="fw-bold font-18 cursor-pointer")
-                unique_details = list(dict.fromkeys(d.get_text(strip=True) for d in room_details))
-                for i, detail in enumerate(unique_details, start=1):
-                    lines.append(
-                        f"Detail {i}: {detail}" if len(unique_details) > 1 else f"Detail: {detail}"
-                    )
-
+        for idx, room in enumerate(rooms, start=1):
+            lines = [
+                f"{idx}. Tipe Kamar: {room.get('name')}",
+                f"Jumlah Tersedia: {room.get('available_room')}",
+                f"Jenis Tempat Tidur: {room.get('bed_type')}"
+            ]
+            offers = room.get("offers", [])
+            for offer in offers:
+                lines.append(f"Penawaran: {offer.get('name')}, Harga: {offer.get('price')}")
             texts.append("\n".join(lines))
             
-        # Gabungkan teks menjadi 1 dokumen
-        isi_gabungan = "\n\n".join(texts)
-        print(isi_gabungan)
-        dokumen_gabungan = [Document(page_content=isi_gabungan, metadata={"source": "html"})]
-
+        final_text = "\n".join(texts)
+        print("Teks untuk indexing:\n", final_text)
+            
         # Buat koleksi jika belum ada
         if not client_qdrant.collection_exists(collection_name):
             client_qdrant.create_collection(
                 collection_name=collection_name,
                 vectors_config=VectorParams(distance=Distance.COSINE, size=1024),
             )
-
-        # Simpan vektor ke Qdrant
-        vector_store = QdrantVectorStore(
-            client=client,
-            collection_name=collection_name,
-            embedding=embeddings,
+            
+        # Buat embedding tunggal
+        embedding = client_embed.feature_extraction(final_text, model="BAAI/bge-m3")
+        
+        # Buat 1 PointStruct saja
+        point = PointStruct(
+            id=str(uuid.uuid4()),
+            vector=embedding,
+            payload={"content": final_text, "source": "API-Hotel"}
         )
-        vector_store.add_documents(documents=dokumen_gabungan)
+        
+        
+        # Upsert ke Qdrant
+        client_qdrant.upsert(collection_name=collection_name, points=[point])
+        
+        # # Buat PointStruct 
+        # vectors = []
+        # for text in texts:
+        #     embedding = client_embed.feature_extraction(
+        #         text,
+        #         model="BAAI/bge-m3",
+        #     )
+        #     vectors.append(
+        #         PointStruct(
+        #             id=str(uuid.uuid4()), 
+        #             vector=embedding, 
+        #             payload={"content": text, "source": "API-Hotel"}
+        #         )
+        #     )
+
+        # # Add to Qdrant Collection
+        # client_qdrant.upsert(
+        #     collection_name=collection_name,
+        #     points=vectors
+        # )
 
         # Cek jumlah vektor setelah indexing
-        total_vectors = client.count(collection_name=collection_name).count
-        print("Jumlah vektor yang tersimpan:", total_vectors)
+        total_vectors = client_qdrant.count(collection_name=collection_name).count
 
         # Hitung durasi proses
         duration = round(time.time() - start_time, 2)  # waktu dalam detik (2 angka desimal)

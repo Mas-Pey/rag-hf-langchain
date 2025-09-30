@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import re
 import pandas as pd
+from datetime import date, timedelta
 
 # --- Title ---
 st.set_page_config(page_title="ForrizAI", layout="centered")
@@ -47,29 +48,36 @@ if st.session_state.get("do_indexing"):
 
     st.session_state.do_indexing = False
     
-# # Input URL HTML
-# html_url = st.sidebar.text_input("Masukkan URL halaman untuk di-indexing")
+# Pilih tanggal checkin & checkout
+checkin = st.sidebar.date_input("Tanggal check-in", value=date.today())
+checkout = st.sidebar.date_input("Tanggal check-out", value=date.today() + timedelta(days=1))
+hotel_id = "FHYH"  # default hotel_id
 
-# # Tombol untuk indexing HTML
-# if st.sidebar.button("📤 Chunking-HTML") and html_url:
-    # st.session_state.do_indexing_html = True    
+# Tombol untuk indexing URL
+if st.sidebar.button("📤 Chunking-URL"):
+    st.session_state.do_indexing_url = True    
 
-# # Jalankan proses indexing HTML jika tombol ditekan
-# if st.session_state.get("do_indexing_html"):
-#     st.markdown("⏳ Proses indexing HTML sedang berjalan...")
+# Jalankan proses indexing URL jika tombol ditekan
+if st.session_state.get("do_indexing_url"):
+    st.markdown("⏳ Proses indexing by URL sedang berjalan...")
 
-#     try:
-#         res = requests.post("http://127.0.0.1:8000/indexing-html", json={"url": html_url})
-#         if res.status_code == 200:
-#             jumlah = res.json().get("jumlah_vektor", "tidak diketahui")
-#             durasi = res.json().get("durasi_detik", "tidak tersedia")
-#             st.success(f"✅ Indexing HTML berhasil! Total vektor: {jumlah} (dalam {durasi} detik)")
-#         else:
-#             st.error(f"❌ Gagal indexing HTML: {res.text}")
-#     except Exception as e:
-#         st.error(f"❌ Terjadi kesalahan saat indexing HTML: {e}")
+    try:
+        payload = {
+            "checkin": checkin.strftime("%Y-%m-%d"),
+            "checkout": checkout.strftime("%Y-%m-%d"),
+            "hotel_id": hotel_id
+        }
+        res = requests.post("http://127.0.0.1:8000/indexing-url", json=payload)
+        if res.status_code == 200:
+            jumlah = res.json().get("jumlah_vektor", "tidak diketahui")
+            durasi = res.json().get("durasi_detik", "tidak tersedia")
+            st.success(f"✅ Indexing ketersediaan kamar berhasil! Total vektor: {jumlah} (dalam {durasi} detik)")
+        else:
+            st.error(f"❌ Gagal indexing : {res.text}")
+    except Exception as e:
+        st.error(f"❌ Terjadi kesalahan saat indexing : {e}")
 
-#     st.session_state.do_indexing_html = False
+    st.session_state.do_indexing_url = False
 
 
 # --- Session State for history ---
