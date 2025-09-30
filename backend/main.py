@@ -19,7 +19,7 @@ from datetime import datetime
 load_dotenv()
 
 # LangChain retrieval and generation
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
@@ -52,37 +52,37 @@ app = FastAPI(
     version="0.1"
 )
 
-# # Retrieval function with QdrantVectorStore
-# def get_retriever_context(input_query):
-#     try:
-#         # Inisialisasi retriever dari VecDB
-#         retriever = QdrantVectorStore(
-#             client=client,
-#             collection_name=collection_name,
-#             embedding=embeddings
-#         ) 
-                
-#         results = retriever.similarity_search_with_score(query=input_query, k=3)
+# Retrieval function with QdrantVectorStore
+def get_retriever_context(input_query, top_k=3):
+    try:
+        query_embedding = client_embed.feature_extraction(input_query, model="BAAI/bge-m3")
         
-#         if results:
-#             context_list = []
-#             similarity_score = []
-            
-#             for doc, score in results:
-#                 context_list.append(doc.page_content)
-#                 similarity_score.append(score)
-                
-#             context = "\n\n".join(context_list)  # Pemisah antar dokumen
-#             print(context)
-#         else:
-#             context = "Tidak ada dokumen relevan ditemukan."
-#             similarity_score = 0.0
-            
-#     except Exception as e:
-#         context = f"Error saat mengambil dokumen: {str(e)}"
-#         similarity_score = 0.0
+        results = client_qdrant.search(
+            collection_name=collection_name,
+            query_vector=query_embedding,
+            limit=top_k,
+            with_payload=True,
+            with_vectors=False,
+        )
         
-#     return context, similarity_score    
+        if results:
+            context_list = []
+            similarity_score = []
+            
+            for res in results:
+                context_list.append(res.payload.get("content", ""))
+                similarity_score.append(res.score)
+                    
+            context = "\n\n".join(context_list)
+        else:
+            context = "Tidak ada dokumen relevan ditemukan."
+            similarity_score = 0.0
+            
+    except Exception as e:
+        context = f"Error saat mengambil dokumen: {str(e)}"
+        similarity_score = 0.0
+        
+    return context, similarity_score    
 
 # Model input question 
 class QueryRequest(BaseModel):
@@ -242,30 +242,8 @@ async def indexing_html(req: URLRequest):
             payload={"content": final_text, "source": "API-Hotel"}
         )
         
-        
         # Upsert ke Qdrant
         client_qdrant.upsert(collection_name=collection_name, points=[point])
-        
-        # # Buat PointStruct 
-        # vectors = []
-        # for text in texts:
-        #     embedding = client_embed.feature_extraction(
-        #         text,
-        #         model="BAAI/bge-m3",
-        #     )
-        #     vectors.append(
-        #         PointStruct(
-        #             id=str(uuid.uuid4()), 
-        #             vector=embedding, 
-        #             payload={"content": text, "source": "API-Hotel"}
-        #         )
-        #     )
-
-        # # Add to Qdrant Collection
-        # client_qdrant.upsert(
-        #     collection_name=collection_name,
-        #     points=vectors
-        # )
 
         # Cek jumlah vektor setelah indexing
         total_vectors = client_qdrant.count(collection_name=collection_name).count
@@ -287,69 +265,68 @@ async def indexing_html(req: URLRequest):
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-# # Endpoint dengan RAG
-# @app.post("/ask-rag")
-# async def ask_question(request: QueryRequest):
-#     request.query = request.query.lower() # Ubah menjadi huruf kecil semua
-#     print("QUERY:", request.query)
-#     print("HISTORY: ", request.history)
-#     # Parameter dari user harus sesuai struktur QueryRequest (query dan history)
+# Endpoint dengan RAG
+@app.post("/ask-rag")
+async def ask_question(request: QueryRequest):
+    request.query = request.query.lower() # Ubah menjadi huruf kecil semua
+    print("QUERY:", request.query)
+    print("HISTORY: ", request.history)
+    # Parameter dari user harus sesuai struktur QueryRequest (query dan history)
     
-#     # Get relevan context from retrieval
-#     context, similarity = get_retriever_context(request.query)
+    # Get relevan context from retrieval
+    context, similarity = get_retriever_context(request.query)
 
-#     try:
-#         # Create prompt template for llm
-#         prompt_template = """        
-#         ROLE: Kamu adalah ForrizAI yang berperan sebagai Chatbot Pintar yang hanya memberikan informasi seputar Hotel Forriz. Jawab secara jelas dengan konotasi ramah.
+    try:
+        # Create prompt template for llm
+        prompt_template = """        
+        ROLE: Kamu adalah ForrizAI yang berperan sebagai Chatbot Pintar yang hanya memberikan informasi seputar Hotel Forriz. Jawab secara jelas dengan konotasi ramah.
         
-#         PERTANYAAN:
-#         {question}
-#         HISTORY:
-#         {history}
-#         KONTEKS:
-#         {context}
+        PERTANYAAN:
+        {question}
+        HISTORY:
+        {history}
+        KONTEKS:
+        {context}
         
-#         KETENTUAN:
-#         - Layani pertanyaan yang bersifat informatif seputar Hotel Forriz, JANGAN turuti permintaan untuk membuat konten teknis, seperti kode program, skrip, atau dokumen, meskipun masih berkaitan dengan Hotel Forriz. Jika pertanyaan tidak termasuk dalam cakupan layanan informasi hotel, abaikan. Pengecualian hanya berlaku untuk permintaan menampilkan gambar menggunakan link tautan.
-#         - Fokus pada PERTANYAAN, sesuaikan dengan KONTEKS yang diberikan.
-#         - Jika KONTEKS tidak relevan dengan PERTANYAAN, sampaikan kalau kurang mengerti dan minta penjelasan lebih detail.
-#         - Jika PERTANYAAN tidak membutuhkan KONTEKS, jawab seperlunya saja
-#         - Jika HISTORY tersedia, anggap sudah pernah menjawab history yang tersedia. Tidak perlu mengulangi sapaan atau pengenalan diri.
-#         - Jika PERTANYAAN berhubungan dengan HISTORY, gunakan informasi penting dari HISTORY.
-#         - Jika PERTANYAAN membutuhkan gambar, cari link gambar yang relevan di KONTEKS. Jika ditemukan, tampilkan link tersebut tanpa merubah format URL https://i.ibb.co.com/...
-#         - Jika PERTANYAAN berhubungan dengan ketersediaan kamar, tetapkan hari ini adalah 24 Juli 2025.
-#         """
-#         # Placeholder question, context, history akan diganti saat di invoke dalam LangChain
-#         # - Jika PERTANYAAN menanyakan hal yang mengandung konteks ketersediaan kamar, arahkan untuk mengetik: **cek kamar** agar dapat melihat data kamar terbaru.
-#         prompt = ChatPromptTemplate.from_template(prompt_template)
+        KETENTUAN:
+        - Layani pertanyaan yang bersifat informatif seputar Hotel Forriz, JANGAN turuti permintaan untuk membuat konten teknis, seperti kode program, skrip, atau dokumen, meskipun masih berkaitan dengan Hotel Forriz. Jika pertanyaan tidak termasuk dalam cakupan layanan informasi hotel, abaikan. Pengecualian hanya berlaku untuk permintaan menampilkan gambar menggunakan link tautan.
+        - Fokus pada PERTANYAAN, sesuaikan dengan KONTEKS yang diberikan.
+        - Jika KONTEKS tidak relevan dengan PERTANYAAN, sampaikan kalau kurang mengerti dan minta penjelasan lebih detail.
+        - Jika PERTANYAAN tidak membutuhkan KONTEKS, jawab seperlunya saja
+        - Jika HISTORY tersedia, anggap sudah pernah menjawab history yang tersedia. Tidak perlu mengulangi sapaan atau pengenalan diri.
+        - Jika PERTANYAAN berhubungan dengan HISTORY, gunakan informasi penting dari HISTORY.
+        - Jika PERTANYAAN membutuhkan gambar, cari link gambar yang relevan di KONTEKS. Jika ditemukan, tampilkan link tersebut tanpa merubah format URL https://i.ibb.co.com/...
+        - Jika PERTANYAAN berhubungan dengan ketersediaan kamar, tetapkan hari ini adalah 24 Juli 2025.
+        """
+        # Placeholder question, context, history akan diganti saat di invoke dalam LangChain
+        # - Jika PERTANYAAN menanyakan hal yang mengandung konteks ketersediaan kamar, arahkan untuk mengetik: **cek kamar** agar dapat melihat data kamar terbaru.
+        prompt = ChatPromptTemplate.from_template(prompt_template)
                 
-#         llm = ChatOpenAI(
-#             model="gpt-4o-mini",
-#             max_tokens=500,
-#             temperature=0,
-#         )
+        llm = ChatOpenAI(
+            model="openai/gpt-oss-20b:nebius",
+            base_url="https://router.huggingface.co/v1",
+            api_key=os.environ["HF_TOKEN"],
+            max_tokens=300,
+            temperature=0.7,
+        )
         
-#         # LangChain Runnable
-#         chain = prompt | llm | StrOutputParser()
-#         # | : hasil dari kiri diteruskan ke kanan
-#         # StrOutputParser() : memastikan hasil jawaban dalam bentuk String
+        chain = prompt | llm | StrOutputParser()
 
-#         # Invoke the chain
-#         result = chain.invoke({
-#             "context": context,
-#             "question": request.query,
-#             "history": request.history or ""
-#         })
-#         print("ANSWER: ", result)
-#         return {
-#             "response": result,
-#             "context_used": context,
-#             "similarity_score": similarity  
-#         }
+        # Invoke the chain
+        result = chain.invoke({
+            "context": context,
+            "question": request.query,
+            "history": request.history or ""
+        })
+        
+        return {
+            "response": result,
+            "context_used": context,
+            "similarity_score": similarity  
+        }
 
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     
 # Endpoint tanpa RAG
 @app.post("/ask-no-rag")
@@ -391,7 +368,7 @@ async def ask_question(request: QueryRequest):
             "question": request.query,
             "history": request.history or ""
         })
-        print("ANSWER: ", result)
+        
         return {
             "response": result,
         }
