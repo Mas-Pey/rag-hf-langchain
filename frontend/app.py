@@ -33,9 +33,8 @@ if st.session_state.get("do_indexing"):
     st.markdown("⏳ Proses indexing sedang berjalan...")
 
     try:
-        # Kirim file PDF ke backend
         files = {"file": (uploaded_file.name, uploaded_file, "application/pdf")}
-        res = requests.post("http://127.0.0.1:8000/indexing", files=files)
+        res = requests.post("https://backend-rag.fly.dev/indexing", files=files)
 
         if res.status_code == 200:
             jumlah = res.json().get("jumlah_vektor", "tidak diketahui")
@@ -67,7 +66,7 @@ if st.session_state.get("do_indexing_url"):
             "checkout": checkout.strftime("%Y-%m-%d"),
             "hotel_id": hotel_id
         }
-        res = requests.post("http://127.0.0.1:8000/indexing-url", json=payload)
+        res = requests.post("https://backend-rag.fly.dev/indexing-url", json=payload)
         if res.status_code == 200:
             jumlah = res.json().get("jumlah_vektor", "tidak diketahui")
             durasi = res.json().get("durasi_detik", "tidak tersedia")
@@ -165,7 +164,7 @@ if user_input := st.chat_input("Tanyakan ke ForrizAI"):
     # Post /ask 
     with st.spinner("Mencari informasi 🔎..."):
         try:
-            res = requests.post("http://127.0.0.1:8000/ask-rag", json=payload)  
+            res = requests.post("https://backend-rag.fly.dev/ask-rag", json=payload)  
             res.raise_for_status() # Error jika status bukan 200
             response = res.json()
             # print(response)
@@ -180,7 +179,7 @@ if user_input := st.chat_input("Tanyakan ke ForrizAI"):
             }
             
         try:
-            res_no_rag = requests.post("http://127.0.0.1:8000/ask-no-rag", json=payload)  
+            res_no_rag = requests.post("https://backend-rag.fly.dev/ask-no-rag", json=payload)  
             res_no_rag.raise_for_status() # Error jika status bukan 200
             response_no_rag = res_no_rag.json()
             # print(response)
@@ -200,7 +199,6 @@ if user_input := st.chat_input("Tanyakan ke ForrizAI"):
         # Regular expression (regex) untuk mendeteksi URL gambar dari string respons bot
         # Cari URL gambar dari bot_reply
         image_urls = re.findall(r"(https?://\S+\.(?:png|jpg|jpeg|gif|webp))", bot_reply)
-        # image_urls = re.findall(r"(https?://[^\s]+?\.(?:png|jpg|jpeg|gif|webp))", bot_reply)
 
         # Tampilkan semua gambar (jika ada)
         for url in image_urls:
@@ -217,7 +215,6 @@ if user_input := st.chat_input("Tanyakan ke ForrizAI"):
         # Regular expression (regex) untuk mendeteksi URL gambar dari string respons bot
         # Cari URL gambar dari bot_reply
         image_urls_no_rag = re.findall(r"(https?://\S+\.(?:png|jpg|jpeg|gif|webp))", bot_reply_no_rag)
-        # image_urls = re.findall(r"(https?://[^\s]+?\.(?:png|jpg|jpeg|gif|webp))", bot_reply)
 
         # Tampilkan semua gambar (jika ada)
         for url in image_urls_no_rag:
