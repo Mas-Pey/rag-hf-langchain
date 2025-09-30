@@ -1,9 +1,4 @@
-# fly.toml app configuration file generated for backend-misty-sea-1453 on 2025-09-30T09:16:53+07:00
-#
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
-
-app = 'backend-misty-sea-1453'
+app = 'backend-rag'
 primary_region = 'sin'
 
 [build]
