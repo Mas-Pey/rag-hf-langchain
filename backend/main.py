@@ -55,7 +55,7 @@ app = FastAPI(
 # Retrieval function with QdrantVectorStore
 def get_retriever_context(input_query, top_k=3):
     try:
-        query_embedding = client_embed.feature_extraction(input_query, model="BAAI/bge-m3")
+        query_embedding = client_embed.feature_extraction(input_query, model="sentence-transformers/all-MiniLM-L6-v2")
         
         results = client_qdrant.search(
             collection_name=collection_name,
@@ -134,7 +134,7 @@ async def index_pdf(file: UploadFile = File(...)):
         if not client_qdrant.collection_exists(collection_name):
             client_qdrant.create_collection(
                 collection_name=collection_name,
-                vectors_config=VectorParams(distance=Distance.COSINE, size=1024),
+                vectors_config=VectorParams(distance=Distance.COSINE, size=384),
             )
             
         # Buat list PointStruct untuk tiap chunk
@@ -142,7 +142,7 @@ async def index_pdf(file: UploadFile = File(...)):
         for chunk in chunks:
             embedding = client_embed.feature_extraction(
                 chunk.page_content,
-                model="BAAI/bge-m3",
+                model="sentence-transformers/all-MiniLM-L6-v2",
             )
             vectors.append(
                 PointStruct(
@@ -229,11 +229,11 @@ async def indexing_html(req: URLRequest):
         if not client_qdrant.collection_exists(collection_name):
             client_qdrant.create_collection(
                 collection_name=collection_name,
-                vectors_config=VectorParams(distance=Distance.COSINE, size=1024),
+                vectors_config=VectorParams(distance=Distance.COSINE, size=384),
             )
             
         # Buat embedding tunggal
-        embedding = client_embed.feature_extraction(final_text, model="BAAI/bge-m3")
+        embedding = client_embed.feature_extraction(final_text, model="sentence-transformers/all-MiniLM-L6-v2")
         
         # Buat 1 PointStruct saja
         point = PointStruct(
