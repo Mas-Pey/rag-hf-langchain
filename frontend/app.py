@@ -52,36 +52,41 @@ checkin = st.sidebar.date_input("Tanggal check-in", value=date.today())
 checkout = st.sidebar.date_input("Tanggal check-out", value=date.today() + timedelta(days=1))
 hotel_id = "FHYH"  # default hotel_id
 
-# Tombol untuk indexing URL
-if st.sidebar.button("📤 Chunking-URL"):
-    st.session_state.do_indexing_url = True    
-
-# Jalankan proses indexing URL jika tombol ditekan
-if st.session_state.get("do_indexing_url"):
-    st.markdown("⏳ Proses indexing by URL sedang berjalan...")
-
-    try:
-        payload = {
-            "checkin": checkin.strftime("%Y-%m-%d"),
-            "checkout": checkout.strftime("%Y-%m-%d"),
-            "hotel_id": hotel_id
-        }
-        res = requests.post("https://backend-rag.fly.dev/indexing-url", json=payload)
-        if res.status_code == 200:
-            jumlah = res.json().get("jumlah_vektor", "tidak diketahui")
-            durasi = res.json().get("durasi_detik", "tidak tersedia")
-            st.success(f"✅ Indexing ketersediaan kamar berhasil! Total vektor: {jumlah} (dalam {durasi} detik)")
-        else:
-            st.error(f"❌ Gagal indexing : {res.text}")
-    except Exception as e:
-        st.error(f"❌ Terjadi kesalahan saat indexing : {e}")
-
-    st.session_state.do_indexing_url = False
-
 
 # --- Session State for history ---
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
+
+# Tombol untuk cek ketersediaan kamar
+if st.sidebar.button("🏨 Cek Ketersediaan Kamar"):
+    try:
+        with st.spinner("🔎 Mengecek ketersediaan kamar..."):
+            payload = {
+                "checkin": checkin.strftime("%Y-%m-%d"),
+                "checkout": checkout.strftime("%Y-%m-%d"),
+                "hotel_id": hotel_id
+            }
+            res = requests.post("https://backend-rag.fly.dev/ask-room", json=payload)
+
+            if res.status_code == 200:
+                data = res.json()
+                bot_reply = data.get("response", "Tidak ada respons dari AI.")
+
+                # simpan ke riwayat chat
+                st.session_state.chat_history.append({
+                    "role": "assistant",
+                    "content": bot_reply
+                })
+
+                # tampilkan context (opsional)
+                with st.sidebar.expander("📄 Context yang digunakan"):
+                    st.markdown(data.get("context", "-"))
+
+            else:
+                st.error(f"❌ Gagal cek kamar: {res.status_code} - {res.text}")
+
+    except Exception as e:
+        st.error(f"❌ Terjadi kesalahan saat cek kamar: {e}")
 
 # --- Display Chat History ---
 for chat in st.session_state.chat_history:
@@ -113,29 +118,6 @@ if user_input := st.chat_input("Tanyakan ke ForrizAI"):
     with col2:
         with st.chat_message("user"):
             st.markdown(user_input)
-            
-    # Cek apakah user minta "cek kamar"
-    if user_input.lower().strip() == "cek kamar":
-        try:
-            df_kamar = pd.read_excel("ketersediaan_kamar.xlsx")
-
-            with st.chat_message("assistant"):
-                st.markdown("📅 **Ketersediaan Kamar Saat Ini:**")
-                st.dataframe(df_kamar, hide_index=True)
-
-            st.session_state.chat_history.append({
-                "role": "assistant", 
-                "content": "Berikut adalah data ketersediaan kamar saat ini.",
-                "images": [],
-                "table": df_kamar
-            })
-            
-        except Exception as e:
-            with st.chat_message("assistant"):
-                st.error(f"Gagal membaca file Excel: {e}")
-
-        # Stop agar tidak lanjut ke API
-        st.stop()
 
     # Lanjutkan proses ke backend (jika bukan "cek kamar")
     
