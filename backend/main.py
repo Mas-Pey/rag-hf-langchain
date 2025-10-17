@@ -296,7 +296,7 @@ async def ask_question(request: QueryRequest):
         - Jika HISTORY tersedia, anggap sudah pernah menjawab history yang tersedia. Tidak perlu mengulangi sapaan atau pengenalan diri.
         - Jika PERTANYAAN berhubungan dengan HISTORY, gunakan informasi penting dari HISTORY.
         - Jika PERTANYAAN membutuhkan gambar, cari link gambar yang relevan di KONTEKS. Jika ditemukan, tampilkan link tersebut tanpa merubah format URL https://i.ibb.co.com/...
-        - Jika PERTANYAAN berhubungan dengan ketersediaan kamar, tetapkan hari ini adalah 24 Juli 2025.
+        - **Jika PERTANYAAN berkaitan dengan ketersediaan kamar, arahkan pengguna untuk menggunakan fitur di navbar dengan menuliskan:** "**Silakan gunakan fitur 'Cek Ketersediaan Kamar' di sidebar untuk melihat ketersediaan kamar terbaru.**"
         """
         # Placeholder question, context, history akan diganti saat di invoke dalam LangChain
         # - Jika PERTANYAAN menanyakan hal yang mengandung konteks ketersediaan kamar, arahkan untuk mengetik: **cek kamar** agar dapat melihat data kamar terbaru.
@@ -375,6 +375,88 @@ async def ask_question(request: QueryRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# Endpoint cek kamar
+@app.post("/ask-room")
+async def ask_room_availability(req: URLRequest):
+    try:
+        # Request ke API hotel
+        url_api = "https://booking.forrizhotels.com/api/v2/offers/room"
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Content-Type": "application/json",
+            "Authorization": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJndWVzdCI6dHJ1ZSwiaWF0IjoxNzQ0MTAzMjk1LCJleHAiOjQ4OTc3MDMyOTUsImp0aSI6IjlveXZCemktdWRqZ3lSeDBOSy1KM1lSWnhTZkNuZ1hUX2dsLV94cExFM0E9In0.h0rWAisFpD6LmZzgh7l8h0ABG_fi_8wxZaULHFDu04U",
+        }
+        
+        payload = {
+            "checkin": req.checkin,
+            "checkout": req.checkout,
+            "id": req.hotel_id,   
+        }
+        
+        response = requests.post(url_api, headers=headers, json=payload)
+        if response.status_code != 200:
+            raise HTTPException(status_code=400, detail=f"Request failed: {response.status_code}")
+        
+        data = response.json()
+        rooms = data.get("room", [])
+
+        # Format hasil jadi teks informatif untuk LLM
+        checkin_text = format_tanggal(req.checkin)
+        checkout_text = format_tanggal(req.checkout)
+        texts = [f"Ketersediaan Kamar untuk tanggal: {checkin_text} s.d {checkout_text}"]
+
+        for idx, room in enumerate(rooms, start=1):
+            lines = [
+                f"{idx}. Tipe Kamar: {room.get('name')}",
+                f"Jumlah Tersedia: {room.get('available_room')}",
+                f"Jenis Tempat Tidur: {room.get('bed_type')}"
+            ]
+            offers = room.get("offers", [])
+            for offer in offers:
+                lines.append(f"Penawaran: {offer.get('name')}, Harga: {offer.get('price')}")
+            texts.append("\n".join(lines))
+            
+        final_text = "\n".join(texts)
+            
+        # Create prompt template for llm
+        prompt_template = """        
+        ROLE: Kamu adalah ForrizAI yang berperan sebagai Chatbot Pintar yang hanya memberikan informasi seputar Hotel Forriz Yogyakarta.
+        Berdasarkan data berikut, berikan jawaban yang ramah dan ringkas kepada pengguna:
+        
+        {final_text}
+        
+        Sampaikan hasil ketersediaan kamar dan harganya dengan format percakapan alami.
+        Jika tidak ada kamar tersedia, sampaikan dengan sopan.
+        """
+        
+        prompt = ChatPromptTemplate.from_template(prompt_template)
+                
+        llm = ChatOpenAI(
+            model="openai/gpt-oss-20b:nebius",
+            base_url="https://router.huggingface.co/v1",
+            api_key=os.environ["HF_TOKEN"],
+            max_tokens=300,
+            temperature=0.7,
+        )
+        
+        chain = prompt | llm | StrOutputParser()
+
+        # Invoke the chain
+        result = chain.invoke({
+            "final_text": final_text 
+        })
+
+        return JSONResponse(
+            content={
+                "response": result,
+                "context": final_text
+            },
+            status_code=200
+        )
+        
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
 if __name__ == "__main__":
